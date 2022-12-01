@@ -1,4 +1,5 @@
 #include "src/buckboost.hpp"
+#include "src/pidcontroller.hpp"
 #include <iostream>
 using namespace std;
 
@@ -6,19 +7,21 @@ int main()
 {
     Simulator sim1(1000);
     auto *plant = new BuckBoost(&sim1, "plant");
-    auto *cnstDuty = new UConstant(&sim1, "cnstDuty");
-    auto *outVin = new UOutput(&sim1, "outVin");
-    auto *outvo = new UOutput(&sim1, "outvo");
-    auto *outiL = new UOutput(&sim1, "outiL");
+    auto *pid = new PID_Controller(&sim1, 1, 0);
+    auto *sum1 = new USum(&sim1, "sum1");
+    auto *cnstin1 = new UConstant(&sim1, "cnstin1");
+    FUOutput(outVo, &sim1);
+    FUOutput(outerr, &sim1);
 
-    sim1.connectU(cnstDuty, plant, 0);
-    sim1.connectU(plant, 0, outVin);
-    sim1.connectU(plant, 1, outvo);
-    sim1.connectU(plant, 2, outiL);
-    cnstDuty->Set_OutValue(0.4);
+    sim1.connectU(cnstin1, sum1);
+    sim1.connectU(sum1, pid, 0);
+    sim1.connectU(pid, 0, plant, 0);
+    sim1.connectU(plant, 0, sum1);
+    sum1->Set_InputGain(-1);
+    sim1.connectU(plant, 1, outVo);
+    sim1.connectU(sum1, outerr);
+    cnstin1->Set_OutValue(Vref);
     sim1.Set_SampleTime(1);
-    outVin->Set_EnableStore(false);
-    outiL->Set_EnableStore(false);
 
     sim1.Initialize();
     sim1.Simulate();

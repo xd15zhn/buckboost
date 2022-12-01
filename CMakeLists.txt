@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.12)
 project(untitled)
 set(CMAKE_BUILD_TYPE release)
-add_executable(${CMAKE_PROJECT_NAME} main.cpp)
+add_executable(${CMAKE_PROJECT_NAME}
+    main.cpp
+    src/buckboost.cpp
+)
 list(APPEND CMAKE_PREFIX_PATH "C:/Users/xd15zhn/Documents/cpplibraries")
 find_package(simucpp REQUIRED)
 message(STATUS "simucpp_VERSION: ${simucpp_VERSION}")

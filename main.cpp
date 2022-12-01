@@ -7,23 +7,45 @@ constexpr double Vin0 = 60;  // 输入电压(V)
 constexpr double Vref = 40;  // 输出电压设定值(V)
 constexpr double f0 = 85000;  // 开关频率(Hz)
 constexpr double T0 = 1e6/f0;  // 开关周期(us)
-constexpr double duty = 0.4;  // 占空比
 constexpr double L0 = 1e-4;  // 开关频率(Hz)
 constexpr double C0 = 1e-6;  // 电容(F)
 constexpr double R0 = 100;  // 负载电阻(ou)
 constexpr double RATE = 1e-6;  // 时间单位为微秒
 
-class DutyCycle_To_Switch: public PackModule
+class BuckBoost: public PackModule
 {
 public:
-    DutyCycle_To_Switch(Simulator *sim, std::string name="DutyCycle_To_Switch") {
-        gainDuty = new UGain(sim, "gainDuty");
-        inTriangle = new UInput(sim, "inTriangle");
-        fcnSwitchVin = new UFcnMISO(sim, "fcnSwitchVin");
+    BuckBoost(Simulator *sim, std::string name="BuckBoost") {
+        intvo = new UIntegrator(sim, "intvo");  // 负载/电容电压输出
+        intiL = new UIntegrator(sim, "intiL");  // 电感电流输出
+        misovo = new UFcnMISO(sim);  // 电压积分器输入
+        misoiL = new UFcnMISO(sim);  // 电流积分器输入
+        gainDuty = new UGain(sim, "gainDuty");  // 输入占空比
+        inTriangle = new UInput(sim, "inTriangle");  // 三角波信号源
+        fcnSwitchVin = new UFcnMISO(sim, "fcnSwitchVin");  // 使用三角波信号源根据输入占空比输出PWM信号
+        misovo->Set_Function([](double *u){
+            double vin = u[0];
+            double vo  = u[1];
+            double iL  = u[2];
+            return (-vo/(R0*C0) + vin*iL/C0)*RATE;
+        });
+        misoiL->Set_Function([](double *u){
+            double vin = u[0];
+            double vo  = u[1];
+            return (-vin/L0*vo + (1-vin)/L0*Vin0)*RATE;
+        });
+        inTriangle->Set_Function([](double u){ return u/T0 - int(u/T0); });
+        fcnSwitchVin->Set_Function([](double *u){ return u[0]<u[1] ? 1.0 : 0.0; });
         sim->connectU(gainDuty, fcnSwitchVin);
         sim->connectU(inTriangle, fcnSwitchVin);
-        inTriangle->Set_Function([](double u){ return u/11.0 - int(u/11.0); });
-        fcnSwitchVin->Set_Function([](double *u){ return u[0]<u[1] ? 0.0 : 1.0; });
+        sim->connectU(fcnSwitchVin, misovo);
+        sim->connectU(intvo, misovo);
+        sim->connectU(intiL, misovo);
+        sim->connectU(misovo, intvo);
+        sim->connectU(fcnSwitchVin, misoiL);
+        sim->connectU(intvo, misoiL);
+        sim->connectU(intiL, misoiL);
+        sim->connectU(misoiL, intiL);
     }
     virtual PUnitModule Get_InputPort(int n=0) const {
         if (n==0) return gainDuty;
@@ -31,59 +53,42 @@ public:
     }
     virtual PUnitModule Get_OutputPort(int n=0) const {
         if (n==0) return fcnSwitchVin;
+        if (n==1) return intvo;
+        if (n==2) return intiL;
         return nullptr;
     }
 private:
     UGain *gainDuty=nullptr;
     UInput *inTriangle=nullptr;
     UFcnMISO *fcnSwitchVin=nullptr;
+    UIntegrator *intvo=nullptr;
+    UIntegrator *intiL=nullptr;
+    UFcnMISO *misovo=nullptr;
+    UFcnMISO *misoiL=nullptr;
 };
 
 int main()
 {
     // 初始化仿真器
-    Simulator sim1(50);
-
-    // 初始化模块
-    auto *intvo = new UIntegrator(&sim1, "intvo");
-    auto *intiL = new UIntegrator(&sim1, "intiL");
-    auto *misovo = new UFcnMISO(&sim1);
-    auto *misoiL = new UFcnMISO(&sim1);
+    Simulator sim1(1000);
+    auto *plant = new BuckBoost(&sim1, "plant");
     auto *cnstDuty = new UConstant(&sim1, "cnstDuty");
-    auto *Wave = new DutyCycle_To_Switch(&sim1, "Wave");
     auto *outVin = new UOutput(&sim1, "outVin");
     auto *outvo = new UOutput(&sim1, "outvo");
     auto *outiL = new UOutput(&sim1, "outiL");
-    sim1.connectU(cnstDuty, Wave, 0);
-    sim1.connectU(Wave, 0, misovo);
-    sim1.connectU(intvo, misovo);
-    sim1.connectU(intiL, misovo);
-    sim1.connectU(misovo, intvo);
-    sim1.connectU(Wave, 0, misoiL);
-    sim1.connectU(intvo, misoiL);
-    sim1.connectU(intiL, misoiL);
-    sim1.connectU(misoiL, intiL);
-    sim1.connectU(Wave, 0, outVin);
-    sim1.connectU(intvo, outvo);
-    sim1.connectU(intiL, outiL);
-    // sim1.Set_SampleTime(1);
-    // outVin->Set_EnableStore(false);
-    outvo->Set_EnableStore(false);
+
+    // 初始化模块
+    sim1.connectU(cnstDuty, plant, 0);
+    sim1.connectU(plant, 0, outVin);
+    sim1.connectU(plant, 1, outvo);
+    sim1.connectU(plant, 2, outiL);
+    cnstDuty->Set_OutValue(0.4);
+    sim1.Set_SampleTime(1);
+    outVin->Set_EnableStore(false);
+    // outvo->Set_EnableStore(false);
     outiL->Set_EnableStore(false);
     // outVin->Set_InputGain(10);
     // outiL->Set_InputGain(10);
-    cnstDuty->Set_OutValue(0.1);
-    misovo->Set_Function([](double *u){
-        double vin = u[0];
-        double vo  = u[1];
-        double iL  = u[2];
-        return (-vo/(R0*C0) + vin*iL/C0)*RATE;
-    });
-    misoiL->Set_Function([](double *u){
-        double vin = u[0];
-        double vo  = u[1];
-        return (-vin/L0*vo + (1-vin)/L0*Vin0)*RATE;
-    });
 
     // 运行仿真
     sim1.Initialize();
